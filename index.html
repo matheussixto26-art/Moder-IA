@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IA Criadora de Modelos 3D</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; background-color: #111; color: white; }
+        canvas { display: block; }
+        #controls { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px; z-index: 10; }
+        input { padding: 8px; border-radius: 4px; border: 1px solid #555; background: #333; color: white; }
+        button { padding: 8px 12px; border-radius: 4px; border: none; background: #007bff; color: white; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        #loader {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            border: 8px solid #f3f3f3; border-top: 8px solid #3498db;
+            border-radius: 50%; width: 60px; height: 60px;
+            animation: spin 2s linear infinite; display: none; /* Começa escondido */
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <input type="text" id="prompt-input" placeholder="Descreva um objeto 3D...">
+        <button id="generate-btn">Gerar Modelo</button>
+    </div>
+
+    <div id="loader"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.164.1/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+        // --- Configuração básica do Three.js ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x2a3b4c);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        directionalLight.position.set(5, 10, 7);
+        scene.add(directionalLight);
+
+        camera.position.z = 5;
+        let currentModel = null; // Para guardar a referência do modelo atual
+
+        // --- Lógica da Aplicação ---
+        const promptInput = document.getElementById('prompt-input');
+        const generateBtn = document.getElementById('generate-btn');
+        const loader = document.getElementById('loader');
+
+        generateBtn.addEventListener('click', async () => {
+            const prompt = promptInput.value;
+            if (!prompt) {
+                alert('Por favor, descreva o objeto que você quer criar.');
+                return;
+            }
+
+            loader.style.display = 'block'; // Mostra o loading
+            generateBtn.disabled = true;
+
+            try {
+                // Chama nosso backend na Vercel
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: prompt })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Erro do servidor: ${response.statusText}`);
+                }
+
+                const objData = await response.text();
+                
+                // Remove o modelo antigo, se existir
+                if (currentModel) {
+                    scene.remove(currentModel);
+                }
+
+                // Carrega o novo modelo usando OBJLoader
+                const loader = new OBJLoader();
+                const object = loader.parse(objData);
+
+                // Adiciona um material básico e adiciona à cena
+                object.traverse((child) => {
+                    if (child instanceof THREE.Mesh) {
+                        child.material = new THREE.MeshStandardMaterial({
+                            color: 0xcccccc,
+                            metalness: 0.1,
+                            roughness: 0.5,
+                        });
+                    }
+                });
+                
+                // Centraliza o objeto
+                const box = new THREE.Box3().setFromObject(object);
+                const center = box.getCenter(new THREE.Vector3());
+                object.position.sub(center);
+
+                currentModel = object;
+                scene.add(currentModel);
+
+            } catch (error) {
+                console.error('Falha ao gerar o modelo:', error);
+                alert('Ocorreu um erro. Verifique o console para mais detalhes.');
+            } finally {
+                loader.style.display = 'none'; // Esconde o loading
+                generateBtn.disabled = false;
+            }
+        });
+
+        // Loop de animação
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Responsividade da janela
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
